@@ -23,6 +23,7 @@ const (
 	ORG                              = "org"
 	ENT                              = "ent"
 	REPO                             = "repo"
+	TEAM							 = "team"
 )
 
 var reservedLabels = []string{"self-hosted", "linux", "x64"}
@@ -39,6 +40,7 @@ type githubRunnerMetadata struct {
 	owner                     string
 	runnerScope               string
 	personalAccessToken       string
+	team					  string
 	repos                     []string
 	labels                    []string
 	targetWorkflowQueueLength int64
@@ -388,6 +390,14 @@ func parseGitHubRunnerMetadata(config *ScalerConfig) (*githubRunnerMetadata, err
 		meta.targetWorkflowQueueLength = defaultTargetWorkflowQueueLength
 	}
 
+	if val, err := getValueFromMetaOrEnv("team", config.TriggerMetadata, config.ResolvedEnv); err == nil && val != "" {
+		meta.team = val
+	} else {
+		if meta.runnerScope == "team" {
+			return nil, err
+		}
+	}
+
 	if val, err := getValueFromMetaOrEnv("labels", config.TriggerMetadata, config.ResolvedEnv); err == nil && val != "" {
 		meta.labels = strings.Split(val, ",")
 	}
@@ -428,6 +438,8 @@ func (s *githubRunnerScaler) getRepositories(ctx context.Context) ([]string, err
 		url = fmt.Sprintf("%s/users/%s/repos", s.metadata.githubAPIURL, s.metadata.owner)
 	case ENT:
 		url = fmt.Sprintf("%s/orgs/%s/repos", s.metadata.githubAPIURL, s.metadata.owner)
+	case TEAM:
+		url = fmt.Sprintf("%s/orgs/%s/teams/%s/repos", s.metadata.githubAPIURL, s.metadata.owner, s.metadata.team)
 	default:
 		return nil, fmt.Errorf("runnerScope %s not supported", s.metadata.runnerScope)
 	}
