@@ -23,7 +23,7 @@ const (
 	ORG                              = "org"
 	ENT                              = "ent"
 	REPO                             = "repo"
-	TEAM							 = "team"
+	TEAM                             = "team"
 )
 
 var reservedLabels = []string{"self-hosted", "linux", "x64"}
@@ -40,7 +40,7 @@ type githubRunnerMetadata struct {
 	owner                     string
 	runnerScope               string
 	personalAccessToken       string
-	team					  string
+	team                      string
 	repos                     []string
 	labels                    []string
 	targetWorkflowQueueLength int64
