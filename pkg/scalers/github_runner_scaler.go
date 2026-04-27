@@ -738,7 +738,6 @@ func (s *githubRunnerScaler) getCachedQueueLength() (int64, error) {
 			s.previousQueueLength,
 			s.previousQueueLengthTime,
 		)
-		s.logger.V(1).Info(msg)
 		if s.recorder != nil {
 			s.recorder.Event(s.scaledObject, corev1.EventTypeWarning, eventreason.KEDAScalersInfo, msg)
 		}
