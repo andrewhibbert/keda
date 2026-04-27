@@ -570,13 +570,12 @@ func (s *githubRunnerScaler) getGithubRequest(ctx context.Context, apiURL string
 	}
 
 	if r.StatusCode != 200 {
+		_, _ = io.Copy(io.Discard, r.Body)
+
 		if r.StatusCode == 304 && s.metadata.EnableEtags {
-			_, _ = io.Copy(io.Discard, r.Body)
 			s.logger.V(1).Info(fmt.Sprintf("The github rest api for the url: %s returned status %d %s", apiURL, r.StatusCode, http.StatusText(r.StatusCode)))
 			return []byte{}, r.StatusCode, nil
 		}
-
-		_, _ = io.Copy(io.Discard, r.Body)
 
 		if s.rateLimit.Remaining == 0 && !s.rateLimit.ResetTime.IsZero() && time.Now().Before(s.rateLimit.ResetTime) {
 			return []byte{}, r.StatusCode, fmt.Errorf("GitHub API rate limit exceeded, reset time %s", s.rateLimit.ResetTime)
@@ -735,7 +734,7 @@ func (s *githubRunnerScaler) getCachedQueueLength() (int64, error) {
 	if !s.previousQueueLengthTime.IsZero() {
 		if s.recorder != nil {
 			s.recorder.Event(s.scaledObject, corev1.EventTypeNormal, eventreason.KEDAScalersInfo,
-				fmt.Sprintf("Github API rate limit exceeded. Cached queue length: %d, last checked at %s",
+				fmt.Sprintf("Github API rate limit exceeded. Cached queue length: %d, last successful cache at %s",
 					s.previousQueueLength, s.previousQueueLengthTime))
 		}
 		return s.previousQueueLength, nil
