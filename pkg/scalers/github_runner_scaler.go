@@ -733,22 +733,14 @@ func (s *githubRunnerScaler) isRateLimited() bool {
 // getCachedQueueLength returns the cached previous queue length
 func (s *githubRunnerScaler) getCachedQueueLength() (int64, error) {
 	if !s.previousQueueLengthTime.IsZero() {
-		msg := fmt.Sprintf(
-			"Github API rate limit exceeded. Cached queue length: %d, last checked at %s",
-			s.previousQueueLength,
-			s.previousQueueLengthTime,
-		)
 		if s.recorder != nil {
-			s.recorder.Event(s.scaledObject, corev1.EventTypeWarning, eventreason.KEDAScalersInfo, msg)
+			s.recorder.Event(s.scaledObject, corev1.EventTypeNormal, eventreason.KEDAScalersInfo,
+				fmt.Sprintf("GitHub API rate limit exceeded. Returning cached queue length: %d", s.previousQueueLength))
 		}
 		return s.previousQueueLength, nil
 	}
 
-	msg := "GitHub API rate limit exceeded. No cached queue length available"
-	if s.recorder != nil {
-		s.recorder.Event(s.scaledObject, corev1.EventTypeWarning, eventreason.KEDAScalersInfo, msg)
-	}
-	return -1, fmt.Errorf("%s", msg)
+	return -1, fmt.Errorf("GitHub API rate limit exceeded. No cached queue length available")
 }
 
 // GetWorkflowQueueLength returns the number of workflow jobs in the queue
