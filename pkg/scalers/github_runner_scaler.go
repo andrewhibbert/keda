@@ -735,7 +735,8 @@ func (s *githubRunnerScaler) getCachedQueueLength() (int64, error) {
 	if !s.previousQueueLengthTime.IsZero() {
 		if s.recorder != nil {
 			s.recorder.Event(s.scaledObject, corev1.EventTypeNormal, eventreason.KEDAScalersInfo,
-				fmt.Sprintf("GitHub API rate limit exceeded. Returning cached queue length: %d", s.previousQueueLength))
+				fmt.Sprintf("Github API rate limit exceeded. Cached queue length: %d, last checked at %s",
+					s.previousQueueLength, s.previousQueueLengthTime))
 		}
 		return s.previousQueueLength, nil
 	}
