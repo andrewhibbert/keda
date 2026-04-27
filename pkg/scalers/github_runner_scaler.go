@@ -14,8 +14,12 @@ import (
 	gha "github.com/bradleyfalzon/ghinstallation/v2"
 	"github.com/go-logr/logr"
 	v2 "k8s.io/api/autoscaling/v2"
+	corev1 "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/client-go/tools/record"
 	"k8s.io/metrics/pkg/apis/external_metrics"
 
+	"github.com/kedacore/keda/v2/pkg/eventreason"
 	"github.com/kedacore/keda/v2/pkg/scalers/scalersconfig"
 	kedautil "github.com/kedacore/keda/v2/pkg/util"
 )
@@ -34,6 +38,8 @@ type githubRunnerScaler struct {
 	metadata                *githubRunnerMetadata
 	httpClient              *http.Client
 	logger                  logr.Logger
+	recorder                record.EventRecorder
+	scaledObject            runtime.Object
 	etags                   map[string]string
 	previousRepos           []string
 	previousWfrs            map[string]map[string]*WorkflowRuns
@@ -379,6 +385,8 @@ func NewGitHubRunnerScaler(config *scalersconfig.ScalerConfig) (Scaler, error) {
 		metadata:                meta,
 		httpClient:              httpClient,
 		logger:                  InitializeLogger(config, "github_runner_scaler"),
+		recorder:                config.Recorder,
+		scaledObject:            config.ScaledObject,
 		etags:                   etags,
 		previousRepos:           previousRepos,
 		previousJobs:            previousJobs,
@@ -492,40 +500,39 @@ func (s *githubRunnerScaler) getRepositories(ctx context.Context) ([]string, err
 }
 
 func (s *githubRunnerScaler) getRateLimit(header http.Header) (RateLimit, error) {
-	var retryAfterTime time.Time
+	var rateLimit RateLimit
 
-	remainingStr := header.Get("X-RateLimit-Remaining")
-	remaining, err := strconv.ParseInt(remainingStr, 10, 64)
-	if err != nil {
-		return RateLimit{}, fmt.Errorf("failed to parse X-RateLimit-Remaining header: %w", err)
+	if remainingStr := header.Get("X-RateLimit-Remaining"); remainingStr != "" {
+		remaining, err := strconv.ParseInt(remainingStr, 10, 64)
+		if err != nil {
+			return RateLimit{}, fmt.Errorf("failed to parse X-RateLimit-Remaining header: %w", err)
+		}
+		rateLimit.Remaining = remaining
 	}
 
-	resetStr := header.Get("X-RateLimit-Reset")
-	reset, err := strconv.ParseInt(resetStr, 10, 64)
-	if err != nil {
-		return RateLimit{}, fmt.Errorf("failed to parse X-RateLimit-Reset header: %w", err)
+	if resetStr := header.Get("X-RateLimit-Reset"); resetStr != "" {
+		reset, err := strconv.ParseInt(resetStr, 10, 64)
+		if err != nil {
+			return RateLimit{}, fmt.Errorf("failed to parse X-RateLimit-Reset header: %w", err)
+		}
+		rateLimit.ResetTime = time.Unix(reset, 0)
 	}
-	resetTime := time.Unix(reset, 0)
 
 	if retryAfterStr := header.Get("Retry-After"); retryAfterStr != "" {
 		retrySeconds, err := strconv.ParseInt(retryAfterStr, 10, 64)
 		if err != nil {
 			return RateLimit{}, fmt.Errorf("failed to parse Retry-After header: %w", err)
 		}
-		retryAfterTime = time.Now().Add(time.Duration(retrySeconds) * time.Second)
+		rateLimit.RetryAfterTime = time.Now().Add(time.Duration(retrySeconds) * time.Second)
 	}
 
-	if retryAfterTime.IsZero() {
-		s.logger.V(1).Info(fmt.Sprintf("Github API rate limit: Remaining: %d, ResetTime: %s", remaining, resetTime))
+	if rateLimit.RetryAfterTime.IsZero() {
+		s.logger.V(1).Info(fmt.Sprintf("Github API rate limit: Remaining: %d, ResetTime: %s", rateLimit.Remaining, rateLimit.ResetTime))
 	} else {
-		s.logger.V(1).Info(fmt.Sprintf("Github API rate limit: Remaining: %d, ResetTime: %s, Retry-After: %s", remaining, resetTime, retryAfterTime))
+		s.logger.V(1).Info(fmt.Sprintf("Github API rate limit: Remaining: %d, ResetTime: %s, Retry-After: %s", rateLimit.Remaining, rateLimit.ResetTime, rateLimit.RetryAfterTime))
 	}
 
-	return RateLimit{
-		Remaining:      remaining,
-		ResetTime:      resetTime,
-		RetryAfterTime: retryAfterTime,
-	}, nil
+	return rateLimit, nil
 }
 
 func (s *githubRunnerScaler) getGithubRequest(ctx context.Context, apiURL string, metadata *githubRunnerMetadata, httpClient *http.Client) ([]byte, int, error) {
@@ -726,15 +733,23 @@ func (s *githubRunnerScaler) isRateLimited() bool {
 // getCachedQueueLength returns the cached previous queue length
 func (s *githubRunnerScaler) getCachedQueueLength() (int64, error) {
 	if !s.previousQueueLengthTime.IsZero() {
-		s.logger.V(1).Info(fmt.Sprintf(
+		msg := fmt.Sprintf(
 			"Github API rate limit exceeded. Cached queue length: %d, last checked at %s",
 			s.previousQueueLength,
 			s.previousQueueLengthTime,
-		))
+		)
+		s.logger.V(1).Info(msg)
+		if s.recorder != nil {
+			s.recorder.Event(s.scaledObject, corev1.EventTypeWarning, eventreason.KEDAScalersInfo, msg)
+		}
 		return s.previousQueueLength, nil
 	}
 
-	return -1, fmt.Errorf("GitHub API rate limit exceeded. No cached queue length available")
+	msg := "GitHub API rate limit exceeded. No cached queue length available"
+	if s.recorder != nil {
+		s.recorder.Event(s.scaledObject, corev1.EventTypeWarning, eventreason.KEDAScalersInfo, msg)
+	}
+	return -1, fmt.Errorf("%s", msg)
 }
 
 // GetWorkflowQueueLength returns the number of workflow jobs in the queue
